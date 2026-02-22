@@ -8,8 +8,7 @@ const config = {
   },
   runtime: {
     // bundle: "./dist/app.bundle.js",
-    bundle:
-      "https://raw.githubusercontent.com/kubesec-diagram/kubesec-diagram.github.io/refs/heads/main/dist/app.bundle.js",
+    bundle: "./dist/app.bundle.js",
     bundleFallbackToModules: true,
     scripts: [
       "./src/url-state.js",
