@@ -17,6 +17,24 @@ It is made for the purpose stated above inside Telenor Norway. It doesn't reflec
 
 ## Changelog
 
+* v10 ()
+  * Added gateway-api as an alternative to ingress
+  * More info about properties of a Namespace
+  * Moved over from using .png exports from draw.io to using .svg, this is a huge win!
+    * All help text and points is now embedded inside the diagram itself. Much easier to edit
+    * Opening up for new possibilities, more of them below in this releasnote.
+    * Easier to save and create new objects, change tags, create new tags and so on.
+  * Menu that contains filter and some buttons
+  * Dark theme
+  * A way to filter
+    * By tags, both priorities and other dags (more to come, can be used to hide elements in the diagram as well)
+    * Search
+    * Hover over an item to see where in the diagram it is
+    * State is saved as url params making menu queries searchable
+  * A way to pin items so it is easier to share those you want to focus on
+  * Lots of lots of bug fixes
+  * Splitting up all javascript into smaller files to make it easier to manage, change and maybe later create a draw.io view library out of it..
+  * There are many more small things. You should try clicking around as it is new. There are a lot of things under the hood that is fixed.
 * v9 (2025-08-12)
   * Added drawing how RBAC, role-bindings and so on works. Many new circles with info.
   * Info about priority and fairness (rate limiting) in api
@@ -73,14 +91,33 @@ It is made for the purpose stated above inside Telenor Norway. It doesn't reflec
 
 ## How to contribute
 
-* Create issues with fixes, improvements and suggestions.
-* Create pull-requests on the drawio file with details about the changes you did.
-* To generate a new export using draw-io, use
-  * export-as > png
-  * border width: 0
-  * uncheck all options
-* Export as svg as well
+* Create an issue if something is wrong or you want to change something
+* Alternative, do the change and submit a PR :)
 
 ## Interactive diagram 🔍
 
 Take a look at [kubesec-diagram.github.io](https://kubesec-diagram.github.io)
+
+## Supported URL parameters
+
+The interactive page supports these query parameters:
+
+* `debug`
+  * Uses local diagram source (`config.imagePaths.debug`) instead of production source.
+  * Turns on some debug logs in some cases
+* `runtime`
+  * `runtime=modules` forces module runtime (`src/*.js`).
+  * `runtime=bundle` forces bundle runtime (`dist/app.bundle.js`).
+  * If not set: localhost defaults to `modules`, other hosts default to `bundle`.
+* `annotations`
+  * Base64-encoded user annotations payload used for sharing annotation state.
+* `menu`
+  * `menu=true|false` controls filter panel visibility.
+* `filter-query`
+  * Restores filter search query.
+* `filter-hide-tags`
+  * Comma-separated list of hidden tags.
+* `pins`
+  * Comma-separated list of pinned annotation slugs (`data-slug` on SVG elements).
+* `constraint`
+  * Currently supported: `constraint=pinned` (only show pinned items).

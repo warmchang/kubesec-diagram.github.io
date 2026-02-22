@@ -1,0 +1,260 @@
+window.createViewportInputService = function createViewportInputService(deps) {
+  let touchStartDistance = 0;
+  let touchStartZoom = 1;
+  let touchStartCenter = { x: 0, y: 0 };
+  let initialized = false;
+
+  function handleResize() {
+    try {
+      deps.updateFilterPanelLayout();
+      deps.syncDiagramSize();
+
+      deps.setCurrentZoom(1);
+      deps.centerImageAtCurrentZoom();
+
+      const currentZoom = deps.getCurrentZoom();
+      const imageTranslateX = deps.getImageTranslateX();
+      const imageTranslateY = deps.getImageTranslateY();
+      deps.image.style.transform = `matrix(${currentZoom}, 0, 0, ${currentZoom}, ${imageTranslateX}, ${imageTranslateY})`;
+      deps.image.style.cursor = "default";
+
+      deps.setCachedBounds(null);
+      deps.setIsTouchActive(false);
+
+      deps.scheduleMarkerPositioning(true);
+    } catch (error) {
+      console.error("Error during resize handling:", error);
+    }
+  }
+
+  function handleWheel(e) {
+    if (typeof deps.shouldIgnoreWheelEvent === "function" && deps.shouldIgnoreWheelEvent(e)) {
+      return;
+    }
+
+    if (deps.getFilterPanelOpen() && deps.filterPanel.contains(e.target)) {
+      return;
+    }
+
+    if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+      return;
+    }
+
+    const imageRect = deps.image.getBoundingClientRect();
+    const isOverImage =
+      e.clientX >= imageRect.left &&
+      e.clientX <= imageRect.right &&
+      e.clientY >= imageRect.top &&
+      e.clientY <= imageRect.bottom;
+
+    if (!isOverImage) {
+      return;
+    }
+
+    e.preventDefault();
+
+    const zoomStep = 0.05;
+    const oldZoom = deps.getCurrentZoom();
+    const imageRectBeforeZoom = deps.image.getBoundingClientRect();
+    if (e.deltaY < 0) {
+      deps.setCurrentZoom(Math.min(oldZoom + zoomStep, deps.getMaxZoom()));
+    } else {
+      deps.setCurrentZoom(Math.max(oldZoom - zoomStep, deps.getMinZoom()));
+    }
+
+    const currentZoom = deps.getCurrentZoom();
+    if (Math.abs(currentZoom - oldZoom) <= 0.001) {
+      return;
+    }
+
+    const wrapperRectNow = deps.wrapper.getBoundingClientRect();
+    const anchorXOnWrapper = e.clientX - wrapperRectNow.left;
+    const anchorYOnWrapper = e.clientY - wrapperRectNow.top;
+
+    const imageLeftOnWrapper = imageRectBeforeZoom.left - wrapperRectNow.left;
+    const imageTopOnWrapper = imageRectBeforeZoom.top - wrapperRectNow.top;
+    const imageBaseLeftOnWrapper = imageLeftOnWrapper - deps.getImageTranslateX();
+    const imageBaseTopOnWrapper = imageTopOnWrapper - deps.getImageTranslateY();
+
+    const targetX = (anchorXOnWrapper - imageLeftOnWrapper) / oldZoom;
+    const targetY = (anchorYOnWrapper - imageTopOnWrapper) / oldZoom;
+
+    deps.setImageTranslateX(
+      anchorXOnWrapper - imageBaseLeftOnWrapper - targetX * currentZoom,
+    );
+    deps.setImageTranslateY(
+      anchorYOnWrapper - imageBaseTopOnWrapper - targetY * currentZoom,
+    );
+
+    if (deps.getCurrentZoom() <= 1) {
+      deps.setCurrentZoom(1);
+      deps.centerImageAtCurrentZoom();
+    }
+
+    deps.updateImageTransform();
+  }
+
+  function handleMouseDown(e) {
+    if (deps.getCurrentZoom() <= 1) return;
+    if (e.button !== 0) return;
+    if (!deps.image.contains(e.target)) return;
+
+    deps.setIsPanning(true);
+    deps.setPanStartX(e.clientX - deps.getImageTranslateX());
+    deps.setPanStartY(e.clientY - deps.getImageTranslateY());
+
+    deps.image.style.cursor = "grabbing";
+    e.preventDefault();
+  }
+
+  function handleMouseMove(e) {
+    if (!deps.getIsPanning()) return;
+
+    deps.setImageTranslateX(e.clientX - deps.getPanStartX());
+    deps.setImageTranslateY(e.clientY - deps.getPanStartY());
+
+    deps.updateImageTransform();
+    e.preventDefault();
+  }
+
+  function handleMouseUp(e) {
+    if (!deps.getIsPanning()) return;
+
+    deps.setIsPanning(false);
+    deps.image.style.cursor =
+      deps.getCurrentZoom() > deps.getMinZoom() ? "grab" : "default";
+    e.preventDefault();
+  }
+
+  function getTouchDistance(touches) {
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  function getTouchCenter(touches) {
+    return {
+      x: (touches[0].clientX + touches[1].clientX) / 2,
+      y: (touches[0].clientY + touches[1].clientY) / 2,
+    };
+  }
+
+  function handleTouchStart(e) {
+    deps.setIsTouchActive(true);
+
+    deps.setCachedBounds(null);
+    deps.getImageBounds(true);
+
+    if (e.touches.length === 2) {
+      touchStartDistance = getTouchDistance(e.touches);
+      touchStartZoom = deps.getCurrentZoom();
+      const center = getTouchCenter(e.touches);
+      const wrapperRect = deps.wrapper.getBoundingClientRect();
+      touchStartCenter = {
+        x: center.x - wrapperRect.left,
+        y: center.y - wrapperRect.top,
+      };
+      if (e.cancelable) e.preventDefault();
+      return;
+    }
+
+    if (e.touches.length === 1 && deps.getCurrentZoom() > 1) {
+      deps.setIsPanning(true);
+      deps.setPanStartX(e.touches[0].clientX - deps.getImageTranslateX());
+      deps.setPanStartY(e.touches[0].clientY - deps.getImageTranslateY());
+      if (e.cancelable) e.preventDefault();
+    }
+  }
+
+  function handleTouchMove(e) {
+    if (e.touches.length === 2) {
+      const currentDistance = getTouchDistance(e.touches);
+      const currentCenter = getTouchCenter(e.touches);
+      const imageRectBeforeZoom = deps.image.getBoundingClientRect();
+
+      const distanceRatio = currentDistance / touchStartDistance;
+      const zoomFactor = Math.max(0.5, Math.min(2.0, distanceRatio));
+      const newZoom = Math.max(
+        deps.getMinZoom(),
+        Math.min(deps.getMaxZoom(), touchStartZoom * zoomFactor),
+      );
+
+      const wrapperRect = deps.wrapper.getBoundingClientRect();
+      const centerX = currentCenter.x - wrapperRect.left;
+      const centerY = currentCenter.y - wrapperRect.top;
+      const imageLeftOnWrapper = imageRectBeforeZoom.left - wrapperRect.left;
+      const imageTopOnWrapper = imageRectBeforeZoom.top - wrapperRect.top;
+      const imageBaseLeftOnWrapper = imageLeftOnWrapper - deps.getImageTranslateX();
+      const imageBaseTopOnWrapper = imageTopOnWrapper - deps.getImageTranslateY();
+
+      const oldZoom = deps.getCurrentZoom();
+      deps.setCurrentZoom(newZoom);
+
+      const targetX = (centerX - imageLeftOnWrapper) / oldZoom;
+      const targetY = (centerY - imageTopOnWrapper) / oldZoom;
+
+      deps.setImageTranslateX(
+        centerX - imageBaseLeftOnWrapper - targetX * deps.getCurrentZoom(),
+      );
+      deps.setImageTranslateY(
+        centerY - imageBaseTopOnWrapper - targetY * deps.getCurrentZoom(),
+      );
+
+      if (deps.getCurrentZoom() <= 1) {
+        deps.setCurrentZoom(1);
+        deps.centerImageAtCurrentZoom();
+      }
+
+      deps.updateImageTransform();
+      if (e.cancelable) e.preventDefault();
+      return;
+    }
+
+    if (e.touches.length === 1 && deps.getIsPanning()) {
+      deps.setImageTranslateX(e.touches[0].clientX - deps.getPanStartX());
+      deps.setImageTranslateY(e.touches[0].clientY - deps.getPanStartY());
+      deps.updateImageTransform();
+      if (e.cancelable) e.preventDefault();
+    }
+  }
+
+  function handleTouchEnd(e) {
+    if (e.touches.length !== 0) return;
+
+    deps.setIsPanning(false);
+    touchStartDistance = 0;
+    touchStartCenter = { x: 0, y: 0 };
+
+    deps.setIsTouchActive(false);
+    deps.setCachedBounds(null);
+    deps.scheduleMarkerPositioning(true);
+  }
+
+  function initialize() {
+    if (initialized) return;
+    initialized = true;
+
+    window.addEventListener("resize", handleResize);
+
+    document.addEventListener("wheel", handleWheel, { passive: false });
+    deps.image.addEventListener("mousedown", handleMouseDown);
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+
+    deps.image.addEventListener("touchstart", handleTouchStart, { passive: false });
+    deps.image.addEventListener("touchmove", handleTouchMove, { passive: false });
+    deps.image.addEventListener("touchend", handleTouchEnd);
+  }
+
+  return {
+    initialize,
+    handleResize,
+    handleWheel,
+    handleMouseDown,
+    handleMouseMove,
+    handleMouseUp,
+    handleTouchStart,
+    handleTouchMove,
+    handleTouchEnd,
+  };
+};

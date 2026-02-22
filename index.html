@@ -46,7 +46,7 @@
                 or open the static image version directly:
             </p>
             <p style="margin: 1em 0;">
-                <a href="https://media.githubusercontent.com/media/kubesec-diagram/kubesec-diagram.github.io/refs/heads/main/kubesec-diagram.png"
+                <a href="https://media.githubusercontent.com/media/kubesec-diagram/kubesec-diagram.github.io/refs/heads/main/kubesec-diagram.svg"
                     target="_blank" style="color: #007acc; text-decoration: underline;">
                     View raw image
                 </a>
@@ -60,33 +60,67 @@
 
     <div id="container">
         <div id="image-wrapper">
-            <img id="main-image" src="" alt="Annotated Image" />
+            <div id="main-image" role="img" aria-label="Kubernetes security diagram"></div>
 
             <div id="tooltip-layer"></div>
         </div>
-        <div id="debug-controls" style="display:none; gap: 6px; flex-direction: column; margin-top: 12px;">
-            <label>
-                X Multiplier: <input id="x-multiplier" type="number" step="0.001" value="1" style="width: 80px;" />
-            </label>
-            <label>
-                Y Multiplier: <input id="y-multiplier" type="number" step="0.001" value="1" style="width: 80px;" />
-            </label>
-            <button id="export-coords" style="margin-top: 8px;">Export Adjusted Annotations</button>
-        </div>
-        <div id="annotation-list"></div>
     </div>
 
-    <div class="footer-link">
-        <div class="footer-buttons">
-            <div id="toggle-annotations" class="footer-control" title="Toggle annotations">Annotations</div>
-            <div id="toggle-markers" class="footer-control" title="Toggle circles">Circles</div>
-            <div class="user-annotations-row">
-                <button id="toggle-user-annotations" class="user-annotations-btn" title="Manage user annotations">User
-                    Annotations</button>
-                <button id="exit-edit-mode" class="exit-edit-mode-btn" title="Exit edit mode"
-                    style="display: none;">exit edit</button>
+    <div id="filter-panel-backdrop" class="filter-panel-backdrop"></div>
+    <aside id="filter-panel" class="filter-panel" aria-hidden="true">
+        <div class="filter-panel-header">
+        </div>
+        <div class="filter-panel-body">
+            <div class="filter-section">
+                <div class="filter-search-row">
+                    <input id="filter-search-input" type="search" placeholder="Search titles, text, links..." autocomplete="off" aria-label="Search annotations" />
+                    <button id="filter-reset-btn" class="filter-icon-btn" type="button" aria-label="Clear all filters" title="Clear all filters">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M12 5V2L7 7l5 5V9c3.31 0 6 2.69 6 6a6 6 0 0 1-6 6 6 6 0 0 1-5.65-4H4.26A8 8 0 0 0 12 23a8 8 0 0 0 0-16z"></path>
+                        </svg>
+                    </button>
+                </div>
+                <small id="filter-result-count">Showing all annotations</small>
+            </div>
+
+            <hr class="filter-divider" />
+
+            <div class="filter-section">
+                <div id="filter-tag-controls" class="tag-control-group"></div>
+            </div>
+
+            <hr class="filter-divider" />
+
+            <div class="filter-section">
+                <div id="filter-results" class="filter-results"></div>
             </div>
         </div>
+
+        <div class="filter-panel-controls">
+            <div class="filter-panel-controls-row">
+                <button id="floating-theme-toggle" class="panel-control-btn" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">
+                    <svg class="theme-icon theme-icon-sun-outline" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10zm0 2.2a2.8 2.8 0 1 1 0 5.6 2.8 2.8 0 0 1 0-5.6zM11 1h2v3h-2V1zm0 19h2v3h-2v-3zM1 11h3v2H1v-2zm19 0h3v2h-3v-2zM4.22 5.64l1.42-1.42 2.12 2.12-1.42 1.42-2.12-2.12zm12.02 12.02 1.42-1.42 2.12 2.12-1.42 1.42-2.12-2.12zM16.24 6.34l2.12-2.12 1.42 1.42-2.12 2.12-1.42-1.42zM4.22 18.36l2.12-2.12 1.42 1.42-2.12 2.12-1.42-1.42z"></path>
+                    </svg>
+                    <svg class="theme-icon theme-icon-sun-filled" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 5a1 1 0 0 1 1 1v1.2a1 1 0 1 1-2 0V6a1 1 0 0 1 1-1zm0 11.8a1 1 0 0 1 1 1V19a1 1 0 1 1-2 0v-1.2a1 1 0 0 1 1-1zM5 12a1 1 0 0 1 1-1h1.2a1 1 0 1 1 0 2H6a1 1 0 0 1-1-1zm11.8 0a1 1 0 0 1 1-1H19a1 1 0 1 1 0 2h-1.2a1 1 0 0 1-1-1zM7.05 7.05a1 1 0 0 1 1.41 0l.85.85a1 1 0 1 1-1.41 1.41l-.85-.85a1 1 0 0 1 0-1.41zm7.79 7.79a1 1 0 0 1 1.41 0l.85.85a1 1 0 0 1-1.41 1.41l-.85-.85a1 1 0 0 1 0-1.41zM16.95 7.05a1 1 0 0 1 0 1.41l-.85.85a1 1 0 0 1-1.41-1.41l.85-.85a1 1 0 0 1 1.41 0zM9.16 14.84a1 1 0 0 1 0 1.41l-.85.85a1 1 0 1 1-1.41-1.41l.85-.85a1 1 0 0 1 1.41 0zM12 8.5a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7z"></path>
+                    </svg>
+                    <span class="theme-label">Dark theme</span>
+                </button>
+
+                <div class="user-annotations-row">
+                    <button id="toggle-user-annotations" class="user-annotations-btn" title="Manage user annotations">User
+                        Annotations</button>
+                    <button id="exit-edit-mode" class="exit-edit-mode-btn" title="Exit edit mode"
+                        style="display: none;">exit edit</button>
+                </div>
+
+                <button id="close-filter-panel" class="close-button close-filter-panel-btn" type="button" aria-label="Close filter panel">&times;</button>
+            </div>
+        </div>
+    </aside>
+
+    <div class="footer-link">
         <div class="footer-github">
             <a href="https://github.com/kubesec-diagram/kubesec-diagram.github.io" target="_blank">GitHub</a>
             (<a href="https://github.com/kubesec-diagram/kubesec-diagram.github.io/issues" target="_blank">issues</a>)
@@ -97,6 +131,12 @@
             <span class="version">v9</span> • <span class="last-updated">Last updated: 2025-08-12</span>
         </span>
     </div>
+
+    <button id="floating-filter-toggle" class="floating-filter-toggle" type="button" aria-label="Open filter menu" title="Open filter menu">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 7h16v2H4V7zm0 4h16v2H4v-2zm0 4h16v2H4v-2z"></path>
+        </svg>
+    </button>
 
     <!-- User Annotations Modal -->
     <div id="user-annotations-modal" class="modal" style="display: none;">
