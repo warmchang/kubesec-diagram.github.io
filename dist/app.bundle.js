@@ -1290,14 +1290,7 @@ window.createViewportInputService = function createViewportInputService(deps) {
       deps.updateFilterPanelLayout();
       deps.syncDiagramSize();
 
-      deps.setCurrentZoom(1);
-      deps.centerImageAtCurrentZoom();
-
-      const currentZoom = deps.getCurrentZoom();
-      const imageTranslateX = deps.getImageTranslateX();
-      const imageTranslateY = deps.getImageTranslateY();
-      deps.image.style.transform = `matrix(${currentZoom}, 0, 0, ${currentZoom}, ${imageTranslateX}, ${imageTranslateY})`;
-      deps.image.style.cursor = "default";
+      deps.updateImageTransform();
 
       deps.setCachedBounds(null);
       deps.setIsTouchActive(false);
