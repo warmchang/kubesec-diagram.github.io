@@ -17,6 +17,7 @@ const filterResultCount = document.getElementById("filter-result-count");
 const filterSearchInput = document.getElementById("filter-search-input");
 const filterTagControls = document.getElementById("filter-tag-controls");
 const openFilterPanelBtn = document.getElementById("floating-filter-toggle");
+const fitToViewportBtn = document.getElementById("floating-fit-toggle");
 const themeToggleBtn = document.getElementById("floating-theme-toggle");
 const closeFilterPanelBtn = document.getElementById("close-filter-panel");
 const resetFilterBtn = document.getElementById("filter-reset-btn");
@@ -33,6 +34,7 @@ if (
   !filterSearchInput ||
   !filterTagControls ||
   !openFilterPanelBtn ||
+  !fitToViewportBtn ||
   !themeToggleBtn ||
   !closeFilterPanelBtn ||
   !resetFilterBtn
@@ -54,6 +56,7 @@ let imageTranslateX = 0;
 let imageTranslateY = 0;
 let isTouchActive = false;
 let hoverPanAnimationFrame = null;
+let fitAllRestoreState = null;
 
 // User annotations variables
 let userAnnotations = [];
@@ -72,6 +75,9 @@ let filterPanelOpen = false;
 let filterPanelOverlayMode = true;
 let pinnedHelpSlugs = new Set();
 let onlyShowPinned = false;
+let fitAllMode = false;
+let fitGeometryMode = "cover";
+let pendingCoverSyncAfterFitExit = false;
 const tagVisibility = new Map();
 const MENU_VISIBLE_PARAM = "menu";
 const FILTER_HIDE_TAGS_PARAM = "filter-hide-tags";
@@ -121,6 +127,303 @@ function onFilterConstraintStateChanged() {
     svgHelpService.refreshPinnedStates();
   }
   urlStateService.updateURLState();
+}
+
+function updateFitButtonState() {
+  fitToViewportBtn.classList.toggle("active", fitAllMode);
+  fitToViewportBtn.setAttribute("aria-pressed", fitAllMode ? "true" : "false");
+  fitToViewportBtn.title = fitAllMode ? "Return to clipped view" : "Show full diagram";
+}
+
+function updateFitBackdropState() {
+  const keepBlackFrame = fitAllMode || pendingCoverSyncAfterFitExit;
+  document.body.classList.toggle("diagram-fit-blackframe", keepBlackFrame);
+}
+
+function captureViewportAnchor(clientX = null, clientY = null) {
+  const wrapperRect = wrapper.getBoundingClientRect();
+  const imageRect = image.getBoundingClientRect();
+  if (!isRectValid(wrapperRect) || !isRectValid(imageRect)) return null;
+
+  const targetClientX =
+    Number.isFinite(clientX) ? clientX : wrapperRect.left + wrapperRect.width / 2;
+  const targetClientY =
+    Number.isFinite(clientY) ? clientY : wrapperRect.top + wrapperRect.height / 2;
+  const anchor = {
+    nx: (targetClientX - imageRect.left) / imageRect.width,
+    ny: (targetClientY - imageRect.top) / imageRect.height,
+    targetClientX,
+    targetClientY,
+  };
+
+  const rootSvg = image.querySelector("svg");
+  if (rootSvg && typeof rootSvg.getScreenCTM === "function") {
+    try {
+      const ctm = rootSvg.getScreenCTM();
+      if (ctm && typeof ctm.inverse === "function") {
+        const svgPoint = new DOMPoint(targetClientX, targetClientY).matrixTransform(ctm.inverse());
+        if (Number.isFinite(svgPoint.x) && Number.isFinite(svgPoint.y)) {
+          anchor.svgX = svgPoint.x;
+          anchor.svgY = svgPoint.y;
+        }
+      }
+    } catch (_error) {
+      // Fallback to normalized anchor below.
+    }
+  }
+
+  return anchor;
+}
+
+function restoreViewportAnchor(anchor) {
+  if (!anchor) return;
+  const desiredX =
+    Number.isFinite(anchor.targetClientX)
+      ? anchor.targetClientX
+      : null;
+  const desiredY =
+    Number.isFinite(anchor.targetClientY)
+      ? anchor.targetClientY
+      : null;
+
+  let targetX = null;
+  let targetY = null;
+  if (Number.isFinite(anchor.svgX) && Number.isFinite(anchor.svgY)) {
+    const rootSvg = image.querySelector("svg");
+    if (rootSvg && typeof rootSvg.getScreenCTM === "function") {
+      try {
+        const ctm = rootSvg.getScreenCTM();
+        if (ctm) {
+          const clientPoint = new DOMPoint(anchor.svgX, anchor.svgY).matrixTransform(ctm);
+          if (Number.isFinite(clientPoint.x) && Number.isFinite(clientPoint.y)) {
+            targetX = clientPoint.x;
+            targetY = clientPoint.y;
+          }
+        }
+      } catch (_error) {
+        targetX = null;
+        targetY = null;
+      }
+    }
+  }
+
+  if (!Number.isFinite(targetX) || !Number.isFinite(targetY)) {
+    const imageRect = image.getBoundingClientRect();
+    if (!isRectValid(imageRect)) return;
+    targetX = imageRect.left + imageRect.width * anchor.nx;
+    targetY = imageRect.top + imageRect.height * anchor.ny;
+  }
+
+  const finalDesiredX = Number.isFinite(desiredX) ? desiredX : targetX;
+  const finalDesiredY = Number.isFinite(desiredY) ? desiredY : targetY;
+
+  imageTranslateX += finalDesiredX - targetX;
+  imageTranslateY += finalDesiredY - targetY;
+}
+
+function disableFitAllKeepViewport(options = {}) {
+  if (!fitAllMode) {
+    updateFitButtonState();
+    return;
+  }
+
+  setFitAllMode(false, {
+    restore: false,
+    anchorClientX: options.anchorClientX,
+    anchorClientY: options.anchorClientY,
+  });
+}
+
+function isViewportFullyCoveredAtCurrentZoom() {
+  const wrapperRect = wrapper.getBoundingClientRect();
+  const imageRect = image.getBoundingClientRect();
+  if (!isRectValid(wrapperRect) || !isRectValid(imageRect)) {
+    return false;
+  }
+
+  const svgEl = image.querySelector("svg");
+  const svgStyles = svgEl ? window.getComputedStyle(svgEl) : null;
+  const svgPadLeft = svgStyles ? Number.parseFloat(svgStyles.paddingLeft) || 0 : 0;
+  const svgPadRight = svgStyles ? Number.parseFloat(svgStyles.paddingRight) || 0 : 0;
+  const svgPadTop = svgStyles ? Number.parseFloat(svgStyles.paddingTop) || 0 : 0;
+  const svgPadBottom = svgStyles ? Number.parseFloat(svgStyles.paddingBottom) || 0 : 0;
+  const scaledPadLeft = svgPadLeft * currentZoom;
+  const scaledPadRight = svgPadRight * currentZoom;
+  const scaledPadTop = svgPadTop * currentZoom;
+  const scaledPadBottom = svgPadBottom * currentZoom;
+
+  const drawableLeft = imageRect.left + scaledPadLeft;
+  const drawableTop = imageRect.top + scaledPadTop;
+  const drawableRight = imageRect.right - scaledPadRight;
+  const drawableBottom = imageRect.bottom - scaledPadBottom;
+
+  const EPSILON = 0.75;
+  const PROMOTION_MARGIN = 6;
+  return (
+    drawableLeft <= wrapperRect.left - PROMOTION_MARGIN + EPSILON &&
+    drawableTop <= wrapperRect.top - PROMOTION_MARGIN + EPSILON &&
+    drawableRight >= wrapperRect.right + PROMOTION_MARGIN - EPSILON &&
+    drawableBottom >= wrapperRect.bottom + PROMOTION_MARGIN - EPSILON
+  );
+}
+
+function nudgeToSvgAnchor(svgX, svgY, targetClientX, targetClientY, iterations = 2) {
+  if (!Number.isFinite(svgX) || !Number.isFinite(svgY)) return;
+  if (!Number.isFinite(targetClientX) || !Number.isFinite(targetClientY)) return;
+
+  const rootSvg = image.querySelector("svg");
+  if (!rootSvg || typeof rootSvg.getScreenCTM !== "function") return;
+
+  for (let i = 0; i < iterations; i += 1) {
+    let point = null;
+    try {
+      const ctm = rootSvg.getScreenCTM();
+      if (!ctm) return;
+      point = new DOMPoint(svgX, svgY).matrixTransform(ctm);
+    } catch (_error) {
+      return;
+    }
+
+    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+    const dx = targetClientX - point.x;
+    const dy = targetClientY - point.y;
+    if (Math.abs(dx) < 0.1 && Math.abs(dy) < 0.1) return;
+
+    imageTranslateX += dx;
+    imageTranslateY += dy;
+    viewportService.applyRawTransform();
+  }
+}
+
+function maybePromoteFitGeometryToCover(anchorClientX = null, anchorClientY = null) {
+  if (!pendingCoverSyncAfterFitExit) return false;
+  if (fitGeometryMode !== "contain") {
+    pendingCoverSyncAfterFitExit = false;
+    updateFitBackdropState();
+    return false;
+  }
+  if (!isViewportFullyCoveredAtCurrentZoom()) {
+    return false;
+  }
+
+  const precisionAnchor = captureViewportAnchor(anchorClientX, anchorClientY);
+  const rectBefore = image.getBoundingClientRect();
+  const zoomBefore = currentZoom;
+  const translateBeforeX = imageTranslateX;
+  const translateBeforeY = imageTranslateY;
+
+  fitGeometryMode = "cover";
+  pendingCoverSyncAfterFitExit = false;
+  updateFitBackdropState();
+  viewportService.syncDiagramSize();
+
+  const rectAfterSync = image.getBoundingClientRect();
+  if (isRectValid(rectBefore) && isRectValid(rectAfterSync)) {
+    const scaleFromWidth = rectAfterSync.width > 0 ? rectBefore.width / rectAfterSync.width : 1;
+    const scaleFromHeight = rectAfterSync.height > 0 ? rectBefore.height / rectAfterSync.height : 1;
+    const scaleFactor = Number.isFinite(scaleFromWidth) ? scaleFromWidth : scaleFromHeight;
+
+    currentZoom = Math.max(minZoom, zoomBefore * scaleFactor);
+    imageTranslateX = translateBeforeX + (rectBefore.left - rectAfterSync.left);
+    imageTranslateY = translateBeforeY + (rectBefore.top - rectAfterSync.top);
+  } else {
+    const anchor = captureViewportAnchor(anchorClientX, anchorClientY);
+    restoreViewportAnchor(anchor);
+  }
+
+  viewportService.applyRawTransform();
+
+  const wrapperRect = wrapper.getBoundingClientRect();
+  const targetClientX = Number.isFinite(anchorClientX)
+    ? anchorClientX
+    : wrapperRect.left + wrapperRect.width / 2;
+  const targetClientY = Number.isFinite(anchorClientY)
+    ? anchorClientY
+    : wrapperRect.top + wrapperRect.height / 2;
+  if (precisionAnchor && Number.isFinite(precisionAnchor.svgX) && Number.isFinite(precisionAnchor.svgY)) {
+    nudgeToSvgAnchor(precisionAnchor.svgX, precisionAnchor.svgY, targetClientX, targetClientY, 2);
+  }
+
+  return true;
+}
+
+function exitFitAllStateOnly() {
+  if (!fitAllMode) return;
+
+  fitAllMode = false;
+  fitAllRestoreState = null;
+  pendingCoverSyncAfterFitExit = true;
+  document.body.classList.remove("diagram-fit-all");
+  updateFitBackdropState();
+  updateFitButtonState();
+}
+
+function disableFitAllForInteraction(anchorClientX = null, anchorClientY = null) {
+  if (!fitAllMode) {
+    updateFitButtonState();
+    return;
+  }
+
+  const anchor = captureViewportAnchor(anchorClientX, anchorClientY);
+  fitAllMode = false;
+  fitAllRestoreState = null;
+  document.body.classList.remove("diagram-fit-all");
+
+  viewportService.syncDiagramSize();
+  restoreViewportAnchor(anchor);
+  viewportService.updateImageTransform();
+  updateFitButtonState();
+}
+
+function setFitAllMode(enabled, options = {}) {
+  const next = Boolean(enabled);
+  if (fitAllMode === next) {
+    updateFitButtonState();
+    return;
+  }
+
+  if (next) {
+    fitAllRestoreState = {
+      zoom: currentZoom,
+      translateX: imageTranslateX,
+      translateY: imageTranslateY,
+    };
+  }
+
+  const shouldRestore = options.restore !== false;
+  const preserveAnchor = !next && !shouldRestore;
+  const anchor = preserveAnchor
+    ? captureViewportAnchor(options.anchorClientX, options.anchorClientY)
+    : null;
+
+  fitAllMode = next;
+  fitGeometryMode = fitAllMode ? "contain" : "cover";
+  if (fitAllMode) {
+    pendingCoverSyncAfterFitExit = false;
+  } else if (options.restore !== false) {
+    pendingCoverSyncAfterFitExit = false;
+  }
+  document.body.classList.toggle("diagram-fit-all", fitAllMode);
+  updateFitBackdropState();
+
+  viewportService.syncDiagramSize();
+  if (fitAllMode) {
+    currentZoom = minZoom;
+    viewportService.updateImageTransform();
+  } else {
+    if (shouldRestore && fitAllRestoreState) {
+      currentZoom = fitAllRestoreState.zoom;
+      imageTranslateX = fitAllRestoreState.translateX;
+      imageTranslateY = fitAllRestoreState.translateY;
+    } else if (preserveAnchor) {
+      restoreViewportAnchor(anchor);
+    } else if (currentZoom <= minZoom + 0.001) {
+      viewportService.alignImageAtCurrentZoom("left", "bottom");
+    }
+    fitAllRestoreState = null;
+  }
+  viewportService.updateImageTransform();
+  updateFitButtonState();
 }
 
 function isRectValid(rect) {
@@ -501,10 +804,21 @@ if (typeof window.createFilterLayoutService !== "function") {
 }
 
 const filterLayoutService = window.createFilterLayoutService({
+  wrapper,
+  image,
   filterPanel,
   filterPanelBackdrop,
   getFilterDockMinImageWidth: () => FILTER_DOCK_MIN_IMAGE_WIDTH,
+  getFitAllMode: () => fitAllMode,
   getDiagramAspectRatio: () => diagramAspectRatio,
+  getImageTranslateX: () => imageTranslateX,
+  getImageTranslateY: () => imageTranslateY,
+  setImageTranslateX: (value) => {
+    imageTranslateX = value;
+  },
+  setImageTranslateY: (value) => {
+    imageTranslateY = value;
+  },
   syncDiagramSize: () => viewportService.syncDiagramSize(),
   updateImageTransform: () => viewportService.updateImageTransform(),
 });
@@ -574,6 +888,9 @@ const viewportService = window.createViewportService({
   image,
   wrapper,
   getDiagramAspectRatio: () => diagramAspectRatio,
+  getFitAllMode: () => fitAllMode,
+  getFitGeometryMode: () => fitGeometryMode,
+  getMinZoom: () => minZoom,
   getCurrentZoom: () => currentZoom,
   setCurrentZoom: (value) => {
     currentZoom = value;
@@ -616,8 +933,16 @@ const viewportInputService = window.createViewportInputService({
     );
   },
   getFilterPanelOpen: () => filterPanelOpen,
-  updateFilterPanelLayout: () => filterPanelStateService.updateFilterPanelLayout(),
+  getFitAllMode: () => fitAllMode,
+  maybePromoteFitGeometryToCover: (x, y) => maybePromoteFitGeometryToCover(x, y),
+  exitFitAllStateOnly: () => exitFitAllStateOnly(),
+  disableFitAllKeepViewport: (options = {}) => disableFitAllKeepViewport(options),
+  disableFitAllForInteraction: (x, y) => disableFitAllForInteraction(x, y),
+  updateFilterPanelLayout: (options = {}) =>
+    filterPanelStateService.updateFilterPanelLayout(options),
   syncDiagramSize: () => viewportService.syncDiagramSize(),
+  alignImageAtCurrentZoom: (horizontal, vertical) =>
+    viewportService.alignImageAtCurrentZoom(horizontal, vertical),
   centerImageAtCurrentZoom: () => viewportService.centerImageAtCurrentZoom(),
   getImageBounds: (forceRefresh = false) =>
     viewportService.getImageBounds(forceRefresh),
@@ -658,6 +983,7 @@ const viewportInputService = window.createViewportInputService({
   setIsTouchActive: (value) => {
     isTouchActive = value;
   },
+  getFitAllMode: () => fitAllMode,
 });
 
 if (typeof window.createThemeService !== "function") {
@@ -796,7 +1122,11 @@ const appLifecycleService = window.createAppLifecycleService({
   getFilterPanelOpen: () => filterPanelOpen,
   getDiagramSourcePath: () => diagramSourcePath,
   syncDiagramSize: () => viewportService.syncDiagramSize(),
+  alignImageAtCurrentZoom: (horizontal, vertical) =>
+    viewportService.alignImageAtCurrentZoom(horizontal, vertical),
   centerImageAtCurrentZoom: () => viewportService.centerImageAtCurrentZoom(),
+  getFitAllMode: () => fitAllMode,
+  updateImageTransform: () => viewportService.updateImageTransform(),
   setFilterPanelOpen: (open) => filterPanelStateService.setFilterPanelOpen(open),
   renderAllMarkers: () => userAnnotationRenderService.renderAllMarkers(),
   clearUserAnnotationVisuals: () => userAnnotationRenderService.clearUserAnnotationVisuals(),
@@ -1135,6 +1465,12 @@ diagramSourcePath = debug
 themeToggleBtn.addEventListener("click", () => {
   themeService.toggleTheme();
 });
+
+fitToViewportBtn.addEventListener("click", () => {
+  setFitAllMode(!fitAllMode);
+});
+
+updateFitButtonState();
 
 filterPanelInputService.initialize();
 

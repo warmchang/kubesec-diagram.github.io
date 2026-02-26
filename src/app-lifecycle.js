@@ -17,9 +17,12 @@ window.createAppLifecycleService = function createAppLifecycleService(deps) {
       deps.syncDiagramSize();
 
       deps.setCurrentZoom(1);
-      deps.centerImageAtCurrentZoom();
-      deps.image.style.transform = `matrix(${deps.getCurrentZoom()}, 0, 0, ${deps.getCurrentZoom()}, ${deps.getImageTranslateX()}, ${deps.getImageTranslateY()})`;
-      deps.image.style.cursor = "default";
+      if (typeof deps.alignImageAtCurrentZoom === "function") {
+        deps.alignImageAtCurrentZoom("left", "bottom");
+      } else {
+        deps.centerImageAtCurrentZoom();
+      }
+      deps.updateImageTransform();
 
       deps.renderAllMarkers();
       deps.setFilterPanelOpen(deps.getFilterPanelOpen());

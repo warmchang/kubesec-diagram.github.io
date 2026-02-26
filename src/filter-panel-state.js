@@ -45,8 +45,8 @@ window.createFilterPanelStateService = function createFilterPanelStateService(de
     return deps.getPanelWidthPx();
   }
 
-  function updateFilterPanelLayout() {
-    const overlayMode = deps.updateLayout(deps.getFilterPanelOpenState());
+  function updateFilterPanelLayout(options = {}) {
+    const overlayMode = deps.updateLayout(deps.getFilterPanelOpenState(), options);
     deps.setFilterPanelOverlayMode(overlayMode);
   }
 

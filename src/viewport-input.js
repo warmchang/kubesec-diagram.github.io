@@ -4,18 +4,178 @@ window.createViewportInputService = function createViewportInputService(deps) {
   let isPinching = false;
   let blockSingleTouchPan = false;
   let initialized = false;
+  let resizeDebugCounter = 0;
+  let resizeAnchor = null;
+  let resizeAnchorResetTimeout = null;
+  let viewportInteractionStarted = false;
+  let resizeSettleTimeout = null;
+
+  function isDebugEnabled() {
+    try {
+      return new URLSearchParams(window.location.search).has("debug");
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  function getRectSnapshot(element) {
+    if (!element || typeof element.getBoundingClientRect !== "function") return null;
+    const rect = element.getBoundingClientRect();
+    return {
+      left: Math.round(rect.left * 100) / 100,
+      top: Math.round(rect.top * 100) / 100,
+      width: Math.round(rect.width * 100) / 100,
+      height: Math.round(rect.height * 100) / 100,
+    };
+  }
+
+  function applyRawImageTransform() {
+    const currentZoom = deps.getCurrentZoom();
+    const imageTranslateX = deps.getImageTranslateX();
+    const imageTranslateY = deps.getImageTranslateY();
+    deps.image.style.transform = `matrix(${currentZoom}, 0, 0, ${currentZoom}, ${imageTranslateX}, ${imageTranslateY})`;
+    deps.image.style.cursor = currentZoom > deps.getMinZoom() ? "grab" : "default";
+  }
 
   function handleResize() {
     try {
-      deps.updateFilterPanelLayout();
-      deps.syncDiagramSize();
+      const debug = isDebugEnabled();
+      const resizeId = ++resizeDebugCounter;
+      const currentZoom = deps.getCurrentZoom();
+      const minZoom = deps.getMinZoom();
 
-      deps.updateImageTransform();
+      if (!viewportInteractionStarted && currentZoom <= minZoom + 0.001) {
+        deps.updateFilterPanelLayout({
+          skipImageTransform: true,
+          disablePanelAnimation: true,
+        });
+        if (typeof deps.getFitAllMode === "function" && deps.getFitAllMode()) {
+          deps.centerImageAtCurrentZoom();
+        } else if (typeof deps.alignImageAtCurrentZoom === "function") {
+          deps.alignImageAtCurrentZoom("left", "bottom");
+        } else {
+          deps.centerImageAtCurrentZoom();
+        }
+        applyRawImageTransform();
+
+        deps.setCachedBounds(null);
+        deps.setIsTouchActive(false);
+        deps.scheduleMarkerPositioning(true);
+
+        if (debug) {
+          console.log(`[resize:${resizeId}] startup-anchored`, {
+            zoom: currentZoom,
+            interactionStarted: viewportInteractionStarted,
+          });
+        }
+        return;
+      }
+
+      if (!resizeAnchor) {
+        const beforeWrapperRect = deps.wrapper.getBoundingClientRect();
+        const beforeImageRect = deps.image.getBoundingClientRect();
+        const centerXBefore = beforeWrapperRect.left + beforeWrapperRect.width / 2;
+        const centerYBefore = beforeWrapperRect.top + beforeWrapperRect.height / 2;
+        const nx =
+          beforeImageRect.width > 0
+            ? (centerXBefore - beforeImageRect.left) / beforeImageRect.width
+            : 0.5;
+        const ny =
+          beforeImageRect.height > 0
+            ? (centerYBefore - beforeImageRect.top) / beforeImageRect.height
+            : 0.5;
+        resizeAnchor = { nx, ny };
+      }
+
+      if (resizeAnchorResetTimeout) {
+        clearTimeout(resizeAnchorResetTimeout);
+        resizeAnchorResetTimeout = null;
+      }
+      resizeAnchorResetTimeout = setTimeout(() => {
+        resizeAnchor = null;
+        resizeAnchorResetTimeout = null;
+      }, 20);
+
+      const nx = resizeAnchor.nx;
+      const ny = resizeAnchor.ny;
+
+      if (debug) {
+        console.groupCollapsed(`[resize:${resizeId}] before`);
+        console.log("window", {
+          innerWidth: window.innerWidth,
+          innerHeight: window.innerHeight,
+          ratio: Number((window.innerWidth / Math.max(1, window.innerHeight)).toFixed(4)),
+        });
+        console.log("wrapperRect", getRectSnapshot(deps.wrapper));
+        console.log("imageRect", getRectSnapshot(deps.image));
+        console.log("transformState", {
+          zoom: deps.getCurrentZoom(),
+          translateX: deps.getImageTranslateX(),
+          translateY: deps.getImageTranslateY(),
+        });
+        console.log("anchor", {
+          nx: Number(nx.toFixed(6)),
+          ny: Number(ny.toFixed(6)),
+        });
+        console.groupEnd();
+      }
+
+      deps.updateFilterPanelLayout({
+        skipImageTransform: true,
+        disablePanelAnimation: true,
+      });
+
+      const afterWrapperRect = deps.wrapper.getBoundingClientRect();
+      const afterImageRect = deps.image.getBoundingClientRect();
+      const centerXAfter = afterWrapperRect.left + afterWrapperRect.width / 2;
+      const centerYAfter = afterWrapperRect.top + afterWrapperRect.height / 2;
+      const targetXAfter = afterImageRect.left + afterImageRect.width * nx;
+      const targetYAfter = afterImageRect.top + afterImageRect.height * ny;
+      const deltaX = centerXAfter - targetXAfter;
+      const deltaY = centerYAfter - targetYAfter;
+
+      if (currentZoom <= minZoom + 0.001) {
+        deps.centerImageAtCurrentZoom();
+      } else {
+        deps.setImageTranslateX(deps.getImageTranslateX() + deltaX);
+        deps.setImageTranslateY(deps.getImageTranslateY() + deltaY);
+      }
+      applyRawImageTransform();
+
+      if (resizeSettleTimeout) {
+        clearTimeout(resizeSettleTimeout);
+        resizeSettleTimeout = null;
+      }
+      resizeSettleTimeout = setTimeout(() => {
+        resizeSettleTimeout = null;
+        deps.updateImageTransform();
+      }, 20);
 
       deps.setCachedBounds(null);
       deps.setIsTouchActive(false);
-
       deps.scheduleMarkerPositioning(true);
+
+      if (debug) {
+        console.groupCollapsed(`[resize:${resizeId}] after`);
+        console.log("window", {
+          innerWidth: window.innerWidth,
+          innerHeight: window.innerHeight,
+          ratio: Number((window.innerWidth / Math.max(1, window.innerHeight)).toFixed(4)),
+        });
+        console.log("wrapperRect", getRectSnapshot(deps.wrapper));
+        console.log("imageRect", getRectSnapshot(deps.image));
+        console.log("transformState", {
+          zoom: deps.getCurrentZoom(),
+          translateX: deps.getImageTranslateX(),
+          translateY: deps.getImageTranslateY(),
+          transform: deps.image.style.transform,
+        });
+        console.log("delta", {
+          deltaX: Number(deltaX.toFixed(4)),
+          deltaY: Number(deltaY.toFixed(4)),
+        });
+        console.groupEnd();
+      }
     } catch (error) {
       console.error("Error during resize handling:", error);
     }
@@ -35,6 +195,10 @@ window.createViewportInputService = function createViewportInputService(deps) {
   }
 
   function handleWheel(e) {
+    const debugWheel = isDebugEnabled();
+    const wasFitAll =
+      typeof deps.getFitAllMode === "function" && deps.getFitAllMode();
+    const oldZoom = deps.getCurrentZoom();
     if (isViewportLockedByMobileTooltip()) {
       const mobileTooltip = window.currentMobileTooltip;
       const rawTarget = e && e.target;
@@ -65,8 +229,8 @@ window.createViewportInputService = function createViewportInputService(deps) {
       return;
     }
 
-    const imageRect = deps.image.getBoundingClientRect();
-    const isOverImage =
+    let imageRect = deps.image.getBoundingClientRect();
+    let isOverImage =
       e.clientX >= imageRect.left &&
       e.clientX <= imageRect.right &&
       e.clientY >= imageRect.top &&
@@ -76,10 +240,15 @@ window.createViewportInputService = function createViewportInputService(deps) {
       return;
     }
 
+    if (debugWheel && wasFitAll) {
+      console.groupCollapsed("[fit-wheel] first zoom while fit-all");
+      console.log("pointer", { x: e.clientX, y: e.clientY, deltaY: e.deltaY });
+      console.log("imageRect", getRectSnapshot(imageRect));
+    }
+
     e.preventDefault();
 
     const zoomStep = 0.05;
-    const oldZoom = deps.getCurrentZoom();
     const imageRectBeforeZoom = deps.image.getBoundingClientRect();
     if (e.deltaY < 0) {
       deps.setCurrentZoom(Math.min(oldZoom + zoomStep, deps.getMaxZoom()));
@@ -91,6 +260,8 @@ window.createViewportInputService = function createViewportInputService(deps) {
     if (Math.abs(currentZoom - oldZoom) <= 0.001) {
       return;
     }
+
+    viewportInteractionStarted = true;
 
     const wrapperRectNow = deps.wrapper.getBoundingClientRect();
     const anchorXOnWrapper = e.clientX - wrapperRectNow.left;
@@ -104,6 +275,23 @@ window.createViewportInputService = function createViewportInputService(deps) {
     const targetX = (anchorXOnWrapper - imageLeftOnWrapper) / oldZoom;
     const targetY = (anchorYOnWrapper - imageTopOnWrapper) / oldZoom;
 
+    if (debugWheel && wasFitAll) {
+      console.log("zoomMath", {
+        oldZoom,
+        currentZoom,
+        anchorXOnWrapper,
+        anchorYOnWrapper,
+        imageLeftOnWrapper,
+        imageTopOnWrapper,
+        targetX,
+        targetY,
+        translateBefore: {
+          x: deps.getImageTranslateX(),
+          y: deps.getImageTranslateY(),
+        },
+      });
+    }
+
     deps.setImageTranslateX(
       anchorXOnWrapper - imageBaseLeftOnWrapper - targetX * currentZoom,
     );
@@ -115,16 +303,64 @@ window.createViewportInputService = function createViewportInputService(deps) {
       deps.setCurrentZoom(deps.getMinZoom());
     }
 
+    const shouldExitFitAllOnThisStep =
+      wasFitAll &&
+      e.deltaY < 0 &&
+      deps.getCurrentZoom() > deps.getMinZoom() + 0.0001 &&
+      typeof deps.exitFitAllStateOnly === "function";
+
+    if (shouldExitFitAllOnThisStep) {
+      deps.exitFitAllStateOnly();
+      if (debugWheel) {
+        console.log("fitAllExitDeferred", {
+          zoomAfterFirstStep: deps.getCurrentZoom(),
+          translate: {
+            x: Number(deps.getImageTranslateX().toFixed(4)),
+            y: Number(deps.getImageTranslateY().toFixed(4)),
+          },
+        });
+      }
+    }
+
     deps.updateImageTransform();
+
+    if (typeof deps.maybePromoteFitGeometryToCover === "function") {
+      deps.maybePromoteFitGeometryToCover(e.clientX, e.clientY);
+    }
+
+    if (debugWheel && wasFitAll) {
+      const postRect = deps.image.getBoundingClientRect();
+      console.log("afterZoom", {
+        imageRectAfterZoom: getRectSnapshot(postRect),
+        translateAfter: {
+          x: deps.getImageTranslateX(),
+          y: deps.getImageTranslateY(),
+        },
+        fitAllActiveAfter: typeof deps.getFitAllMode === "function" ? deps.getFitAllMode() : false,
+      });
+      console.groupEnd();
+    }
   }
 
   function handleMouseDown(e) {
     if (isViewportLockedByMobileTooltip()) return;
-    if (deps.getCurrentZoom() <= 1) return;
+    if (!canPanAtCurrentZoom()) return;
     if (e.button !== 0) return;
     if (!deps.image.contains(e.target)) return;
 
+    if (typeof deps.getFitAllMode === "function" && deps.getFitAllMode()) {
+      if (typeof deps.disableFitAllForInteraction === "function") {
+        deps.disableFitAllForInteraction(e.clientX, e.clientY);
+      } else if (typeof deps.disableFitAllKeepViewport === "function") {
+        deps.disableFitAllKeepViewport({
+          anchorClientX: e.clientX,
+          anchorClientY: e.clientY,
+        });
+      }
+    }
+
     deps.setIsPanning(true);
+    viewportInteractionStarted = true;
     deps.setPanStartX(e.clientX - deps.getImageTranslateX());
     deps.setPanStartY(e.clientY - deps.getImageTranslateY());
 
@@ -245,6 +481,20 @@ window.createViewportInputService = function createViewportInputService(deps) {
     deps.getImageBounds(true);
 
     if (e.touches.length === 2) {
+      if (typeof deps.getFitAllMode === "function" && deps.getFitAllMode()) {
+        if (typeof deps.disableFitAllForInteraction === "function") {
+          deps.disableFitAllForInteraction(
+            e.touches[0] ? e.touches[0].clientX : null,
+            e.touches[0] ? e.touches[0].clientY : null,
+          );
+        } else if (typeof deps.disableFitAllKeepViewport === "function") {
+          deps.disableFitAllKeepViewport({
+            anchorClientX: e.touches[0] ? e.touches[0].clientX : null,
+            anchorClientY: e.touches[0] ? e.touches[0].clientY : null,
+          });
+        }
+      }
+      viewportInteractionStarted = true;
       isPinching = true;
       blockSingleTouchPan = false;
       deps.setIsPanning(false);
@@ -260,7 +510,21 @@ window.createViewportInputService = function createViewportInputService(deps) {
     }
 
     if (e.touches.length === 1 && !blockSingleTouchPan && canPanAtCurrentZoom()) {
+      if (typeof deps.getFitAllMode === "function" && deps.getFitAllMode()) {
+        if (typeof deps.disableFitAllForInteraction === "function") {
+          deps.disableFitAllForInteraction(
+            e.touches[0] ? e.touches[0].clientX : null,
+            e.touches[0] ? e.touches[0].clientY : null,
+          );
+        } else if (typeof deps.disableFitAllKeepViewport === "function") {
+          deps.disableFitAllKeepViewport({
+            anchorClientX: e.touches[0] ? e.touches[0].clientX : null,
+            anchorClientY: e.touches[0] ? e.touches[0].clientY : null,
+          });
+        }
+      }
       deps.setIsPanning(true);
+      viewportInteractionStarted = true;
       deps.setPanStartX(e.touches[0].clientX - deps.getImageTranslateX());
       deps.setPanStartY(e.touches[0].clientY - deps.getImageTranslateY());
       if (e.cancelable) e.preventDefault();
