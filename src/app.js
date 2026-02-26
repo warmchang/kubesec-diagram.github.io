@@ -618,7 +618,10 @@ function centerHelpRecordInView(record, durationMs = 250, onComplete = null) {
     return;
   }
 
-  if (typeof tooltipService !== "undefined" && tooltipService.isMobileDevice()) {
+  const hasDesktopHover =
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+  if (typeof tooltipService !== "undefined" && tooltipService.isMobileDevice() && !hasDesktopHover) {
     if (typeof onComplete === "function") onComplete();
     return;
   }
@@ -721,24 +724,26 @@ function focusHelpRecord(record) {
 
   const wrapperRect = wrapper.getBoundingClientRect();
   const targetRect = record.element.getBoundingClientRect();
+  const focusPoint = getElementFocusPoint(record.element);
   if (!isRectValid(wrapperRect) || !isRectValid(targetRect)) {
     return;
   }
 
-  const viewportCenterX = wrapperRect.left + wrapperRect.width / 2;
-  const viewportCenterY = wrapperRect.top + wrapperRect.height / 2;
-  const targetCenterX = targetRect.left + targetRect.width / 2;
-  const targetCenterY = targetRect.top + targetRect.height / 2;
+  const visibleCenter = getVisibleViewportCenter();
+  const viewportCenterX = visibleCenter.x;
+  const viewportCenterY = visibleCenter.y;
+  const targetCenterX = focusPoint ? focusPoint.x : targetRect.left + targetRect.width / 2;
+  const targetCenterY = focusPoint ? focusPoint.y : targetRect.top + targetRect.height / 2;
 
   imageTranslateX += viewportCenterX - targetCenterX;
   imageTranslateY += viewportCenterY - targetCenterY;
   viewportService.updateImageTransform();
 }
 
-function goToHelpRecord(record) {
+function goToHelpRecord(record, options = {}) {
   if (!record || !record.element) return;
 
-  if (filterPanelOpen) {
+  if (filterPanelOpen && options.closePanel !== false) {
     filterPanelStateService.setFilterPanelOpen(false);
   }
 
@@ -747,6 +752,9 @@ function goToHelpRecord(record) {
       viewportService.syncDiagramSize();
       focusHelpRecord(record);
       pulseGoToElement(record.element);
+      if (typeof options.onComplete === "function") {
+        options.onComplete();
+      }
     });
   });
 }
@@ -1079,6 +1087,8 @@ const filterResultsService = window.createFilterResultsService({
   clearFilterHighlight: () => filterHighlightService.clear(),
   bindResultHighlight: (item, record) =>
     filterHighlightService.bindResultHighlight(item, record),
+  highlightResultTemporarily: (record, sourceEl, durationMs) =>
+    filterHighlightService.highlightTemporarily(record, sourceEl, durationMs),
   isMobileDevice: () => tooltipService.isMobileDevice(),
   getFilterPanelOpen: () => filterPanelOpen,
   getFilterPanelOverlayMode: () => filterPanelOverlayMode,

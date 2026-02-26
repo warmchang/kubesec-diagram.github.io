@@ -829,7 +829,7 @@ body.diagram-fit-blackframe #main-image {
     pointer-events: none;
     z-index: 21050;
     opacity: 0;
-    transition: opacity 0.12s ease;
+    transition: opacity 0.25s ease;
 }
 
 .filter-highlight-line-layer.active {
@@ -842,6 +842,10 @@ body.diagram-fit-blackframe #main-image {
     stroke-linecap: round;
     filter:
         drop-shadow(0 0 1px rgba(255, 255, 255, 0.95));
+}
+
+.help-highlight {
+    filter: drop-shadow(0 0 3px rgba(56, 189, 248, 0.95)) drop-shadow(0 0 8px rgba(56, 189, 248, 0.45));
 }
 
 .footer-link {
@@ -896,6 +900,10 @@ body.diagram-fit-blackframe #main-image {
     z-index: 11100;
     box-shadow: 0 6px 16px rgba(2, 132, 199, 0.22);
     transition: transform 0.16s ease, background-color 0.16s ease, box-shadow 0.16s ease, opacity 0.12s ease;
+}
+
+body.filter-docked-open .floating-fit-toggle {
+    right: calc(var(--filter-panel-space) + 8px);
 }
 
 .floating-fit-toggle svg {

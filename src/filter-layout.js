@@ -121,12 +121,9 @@ window.createFilterLayoutService = function createFilterLayoutService(deps) {
       typeof options.preserveView === "boolean" ? options.preserveView : !fitAllMode;
     const disablePanelAnimation = Boolean(options.disablePanelAnimation);
     const panelWidth = getPanelWidthPx();
-    const canDockPanel =
-      window.innerWidth > 768 &&
-      (window.innerWidth - panelWidth) >= deps.getFilterDockMinImageWidth();
+    const canDockPanel = window.innerWidth > 768;
 
     const filterPanelOverlayMode = !(filterPanelOpen && canDockPanel);
-
     document.body.classList.toggle(
       "filter-overlay-open",
       filterPanelOpen && filterPanelOverlayMode,

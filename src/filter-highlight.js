@@ -6,6 +6,7 @@ window.createFilterHighlightService = function createFilterHighlightService(deps
   let lineElement = null;
   let lineFrame = null;
   let lineAnimationFrame = null;
+  let temporaryHighlightTimeout = null;
   const VIEWPORT_PADDING = 8;
 
   function clampToViewport(value, max) {
@@ -251,6 +252,10 @@ window.createFilterHighlightService = function createFilterHighlightService(deps
 
   function clear() {
     pendingHighlightToken += 1;
+    if (temporaryHighlightTimeout) {
+      clearTimeout(temporaryHighlightTimeout);
+      temporaryHighlightTimeout = null;
+    }
 
     if (!activeFilterHighlight) return;
 
@@ -271,6 +276,8 @@ window.createFilterHighlightService = function createFilterHighlightService(deps
     clear();
     if (!record?.element) return;
 
+    record.element.classList.add("help-highlight");
+
     if (sourceEl) {
       ensureLineLayer();
       activeConnection = {
@@ -281,6 +288,22 @@ window.createFilterHighlightService = function createFilterHighlightService(deps
     }
 
     activeFilterHighlight = { type: "help", record };
+  }
+
+  function highlightTemporarily(record, sourceEl = null, durationMs = 1000) {
+    if (!record?.element) return;
+    if (temporaryHighlightTimeout) {
+      clearTimeout(temporaryHighlightTimeout);
+      temporaryHighlightTimeout = null;
+    }
+
+    highlightHelpAnnotation(record, sourceEl);
+    temporaryHighlightTimeout = setTimeout(() => {
+      temporaryHighlightTimeout = null;
+      if (activeFilterHighlight?.record === record) {
+        clear();
+      }
+    }, Math.max(100, Number(durationMs) || 1000));
   }
 
   function bindResultHighlight(item, record) {
@@ -310,6 +333,7 @@ window.createFilterHighlightService = function createFilterHighlightService(deps
   return {
     clear,
     highlightHelpAnnotation,
+    highlightTemporarily,
     bindResultHighlight,
     refreshConnectionPosition,
   };

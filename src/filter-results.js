@@ -40,10 +40,12 @@ window.createFilterResultsService = function createFilterResultsService(deps) {
   }
 
   function shouldUseGoToNavigation() {
-    if (typeof deps.isMobileDevice !== "function") return false;
     if (typeof deps.getFilterPanelOpen !== "function") return false;
+    return deps.getFilterPanelOpen();
+  }
 
-    return deps.isMobileDevice() && deps.getFilterPanelOpen();
+  function isCompactMobileMode() {
+    return window.innerWidth <= 768;
   }
 
   function createResultItem(record, options = {}) {
@@ -85,7 +87,7 @@ window.createFilterResultsService = function createFilterResultsService(deps) {
     item.innerHTML = `<div class="filter-result-head"><strong>${deps.escapeHTML(record.title || "Help")}</strong></div><div class="filter-result-content">${record.bodyHtml || "Help annotation"}</div>${actionsHtml}`;
     const useGoToNavigation = shouldUseGoToNavigation();
 
-    if (!inactive && !useGoToNavigation) {
+    if (!inactive) {
       deps.bindResultHighlight(item, record);
     }
 
@@ -130,7 +132,17 @@ window.createFilterResultsService = function createFilterResultsService(deps) {
         if (clickTarget && clickTarget.closest('[data-role="pin"]')) return;
         if (event.cancelable) event.preventDefault();
         event.stopPropagation();
-        deps.goToHelpRecord(record);
+
+        const isMobile = isCompactMobileMode();
+        const usePointer = !isMobile;
+        deps.goToHelpRecord(record, {
+          closePanel: isMobile,
+          onComplete: () => {
+            if (typeof deps.highlightResultTemporarily === "function") {
+              deps.highlightResultTemporarily(record, usePointer ? item : null, 1000);
+            }
+          },
+        });
       };
 
       item.addEventListener("touchstart", onTouchStart, { passive: true });
