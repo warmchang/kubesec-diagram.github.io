@@ -1152,6 +1152,10 @@ body.mobile-tooltip-open .mobile-go-to-indicator {
 
 /* Mobile adjustments */
 @media (max-width: 768px) {
+    .floating-fit-toggle {
+        display: none;
+    }
+
     .footer-buttons {
         display: flex;
         flex-direction: row;
